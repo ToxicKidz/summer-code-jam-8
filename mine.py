@@ -54,7 +54,7 @@ class Cursor(Widget):
         super().__init__(*args, **kwargs)
 
     def on_press(self, key: int) -> bool:
-        """Handle keys for cursor movement."""
+        """Handle keys for Cursor movement."""
         top, left = self.top, self.left
         height, width = self.height, self.width
 
@@ -161,7 +161,7 @@ class Lawn(ArrayWin):
         return solution_map
 
     def reveal_mines(self) -> None:
-        """Reveal mine locations."""
+        """Reveal all mine locations."""
         if not self.revealed:
             self.revealed = True
             self[:, :] = np.where(self._mine_map, MINE_SYMBOL, self[:, :])
@@ -169,9 +169,13 @@ class Lawn(ArrayWin):
     def refresh(self) -> None:
         """Handle terminal display refresh."""
         if self.timer and not self.revealed:
+            # Timer on the right of scoreboard
             self.scoreboard[0, -3:] = str(int(self.timer)).rjust(3, '0')
             self.timer += DELTA
+
+            # Flagging count on the left
             self.scoreboard[0, :3] = str(self._num_mines - (self._state_map == FLAGGED_STATE).sum()).rjust(3, '0')
+
         return super().refresh()
 
     def on_press(self, key: int) -> bool:
@@ -184,13 +188,17 @@ class Lawn(ArrayWin):
 
         if key == FORFEIT_KEY:
             self.reveal_mines()
+
         elif key == RESET_KEY:
             self.init_lawn()
+
         elif not self.revealed:
             if key == SPACE_KEY:
                 self.poke()
+
             if key == FLAG_KEY:
                 self.flag()
+
         else:
             return super().on_press(key)
         return True
@@ -237,9 +245,11 @@ class Lawn(ArrayWin):
 
     def win(self) -> None:
         """Handle winning."""
+        # Replace good flags with boxed check marks, and all other locations with solutions
         self[:, :] = np.where(self._mine_map,
                               BOXEDCHECK_SYMBOL, self._solution_map)
 
+        # Put up smiley and winning shoutout
         self.scoreboard[0, len(self.scoreboard[0]) // 2] = HAPPYFACE_SYMBOL
         self.scoreboard[1, :8] = "You win!"
         self.schedule_marching(.1)
@@ -248,15 +258,18 @@ class Lawn(ArrayWin):
 
     def lose(self, r: int, c: int) -> None:
         """Handle losing."""
+        # Replace good flags with boxed check marks, bad flags with boxed crosses,
+        #  and all other locations with solutions
         self[:, :] = np.where(self._mine_map,
                               np.where(self._state_map == FLAGGED_STATE, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
                               np.where(self._state_map == FLAGGED_STATE, BOXEDCROSS_SYMBOL, self._solution_map))
 
-        if r and c:
-            colors_copy = np.full(self._shape, self.color)
-            colors_copy[r, c] = colors.WHITE_ON_RED
-            self.colors = colors_copy
+        # Color exploded mine
+        colors_copy = np.full(self._shape, self.color)
+        colors_copy[r, c] = colors.WHITE_ON_RED
+        self.colors = colors_copy
 
+        # Put up sad face and losing callout
         self.scoreboard[0, len(self.scoreboard[0]) // 2] = SADFACE_SYMBOL
         self.scoreboard[1, :8] = "You die!"
         self.schedule_marching(.8)
@@ -265,8 +278,10 @@ class Lawn(ArrayWin):
 
     def evaluate(self) -> None:
         """Evaluate winning or losing."""
+        # If all and only all mines are covered, win
         if np.all(self._mine_map == (self._state_map != UNCOVERED_STATE)):
             self.win()
+        # Otherwise, if the number of covered cells matches the number of mines, lose
         elif (self._state_map != UNCOVERED_STATE).sum() == self._num_mines:
             row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
             self.lose(row, col)
@@ -278,8 +293,11 @@ with ScreenManager() as gsm:
 
     text_len = 20
 
+    # Draw the scoreboard on the bottom
     scoreboard = gsm.root.new_widget(OFFSET_TOP + rows + 2, OFFSET_LEFT, height=2, width=cols,
                                      color=colors.RED_ON_BLACK, create_with="ArrayWin")
+
+    # Draw instructions on the side
     instructions = gsm.root.new_widget(OFFSET_TOP, OFFSET_LEFT + cols + 2, height=6, width=text_len,
                                        color=colors.YELLOW_ON_BLACK, create_with="ArrayWin")
     instructions[0, :] = 'r: reset game'.ljust(text_len, ' ')
@@ -289,12 +307,15 @@ with ScreenManager() as gsm:
     instructions[4, :] = 'arrows: move pointer'.ljust(text_len, ' ')
     instructions[5, :] = 'esc: leave game'.ljust(text_len, ' ')
 
+    # Draw board
     lawn = gsm.root.new_widget(rows=rows, cols=cols, num_mines=num_mines,
                                scoreboard=scoreboard, gsm=gsm, create_with=Lawn)
     lawn.init_lawn()
 
+    # Draw Cursor
     cursor = gsm.root.new_widget(rows, cols, OFFSET_TOP, OFFSET_LEFT, 1, 1, transparent=True, create_with=Cursor)
     cursor.window.addstr(0, 0, CURSOR_SYMBOL)
 
+    # Schedule refreshing task
     gsm.schedule(gsm.root.refresh, delay=DELTA)
     gsm.run()
