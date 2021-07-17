@@ -1,18 +1,21 @@
+
 import numpy as np
 
 from nurses import ScreenManager, Widget, colors
+from nurses.keys import DOWN, LEFT, RIGHT, UP
 from nurses.widgets import ArrayWin
-from nurses.widgets.behaviors import Movable
 
 # Keybindings
-SPACE, RESET = ord(' '), ord('r')
+SPACE_KEY, RESET_KEY = ord(' '), ord('r')
 FORFEIT_KEY = ord('g')
 FLAG_KEY = ord('f')
+
+# Miscs
 OFFSET_TOP, OFFSET_LEFT = 5, 25
 DELTA = .1
 
 # Symbols
-UNTOUCHED_SYMBOL = '❑'
+UNVISITED_SYMBOL = '❑'
 EMPTY_SYMBOL = '⯀'
 MINE_SYMBOL = '☠'
 FLAG_SYMBOL = '☢'
@@ -23,13 +26,24 @@ BOXEDCHECK_SYMBOL = '☑'
 BOXEDCROSS_SYMBOL = '☒'
 
 # States
-UNVISITED = 0
-VISITED = 1
-FLAGGED = 2
+UNVISITED_STATE = 0
+VISITED_STATE = 1
+FLAGGED_STATE = 2
 
 
-class Cursor(Widget, Movable):
+class Cursor(Widget):
     """Movable cursor to point to a land location."""
+
+    move_up = UP
+    move_down = DOWN
+    move_left = LEFT
+    move_right = RIGHT
+
+    lr_step = 1
+    ud_step = 1
+
+    wrap_height = None
+    wrap_width = None
 
     offset_top = OFFSET_TOP
     offset_left = OFFSET_LEFT
@@ -39,11 +53,37 @@ class Cursor(Widget, Movable):
         self.wrap_width = wrap_width
         super().__init__(*args, **kwargs)
 
+    def on_press(self, key: int) -> bool:
+        """Handle keys for cursor movement."""
+        top, left = self.top, self.left
+        height, width = self.height, self.width
+
+        if key == self.move_up:
+            if top > 0:
+                self.top -= self.ud_step
+        elif key == self.move_down:
+            if top + height < self.parent.height:
+                self.top += self.ud_step
+        elif key == self.move_left:
+            if left > 0:
+                self.left -= self.lr_step
+        elif key == self.move_right:
+            if left + width < self.parent.width:
+                self.left += self.lr_step
+        else:
+            return super().on_press(key)
+
+        if self.wrap_height:
+            self.top = (self.top - self.offset_top) % self.wrap_height + self.offset_top
+        if self.wrap_width:
+            self.left = (self.left - self.offset_left) % self.wrap_width + self.offset_left
+        return True
+
 
 class Lawn(ArrayWin):
     """MineSweeper Game Board."""
 
-    def __init__(self, rows: int, cols: int, num_mines: int, *args, **kwargs) -> None:
+    def __init__(self, rows: int, cols: int, num_mines: int, scoreboard: ArrayWin, *args, **kwargs) -> None:
 
         # Initialize display from ArrayWin
         super().__init__(OFFSET_TOP, OFFSET_LEFT, rows, cols, *args, **kwargs)
@@ -59,25 +99,26 @@ class Lawn(ArrayWin):
         self.solution_map = np.zeros((rows, cols)).astype(int)
 
         # Scoreboard display scores and shoutout banner
-        self.scoreboard = gsm.root.new_widget(OFFSET_TOP + rows + 2, OFFSET_LEFT, 2, max(8, cols),
-                                              color=colors.YELLOW_ON_BLACK, create_with="ArrayWin")
+        self.scoreboard = scoreboard
 
-    def marching_scoreboard(self) -> None:
-        """Animate scoreboard with marching texts."""
-        head = self.scoreboard[1, 0]
-        tail = self.scoreboard[1, 1:]
-        self.scoreboard[1, :-1] = tail
-        self.scoreboard[1, -1] = head
+        def marching_scoreboard() -> None:
+            """Animate scoreboard with marching texts."""
+            head = self.scoreboard[1, 0]
+            tail = self.scoreboard[1, 1:]
+            self.scoreboard[1, :-1] = tail
+            self.scoreboard[1, -1] = head
+
+        self.marching = gsm.schedule(marching_scoreboard, delay=.3, n=120)
 
     def init_lawn(self) -> None:
         """Initialize game board for the next game."""
-        self[:, :] = UNTOUCHED_SYMBOL
+        self[:, :] = UNVISITED_SYMBOL
 
         # Display the game board
         self.revealed = False
 
         # Clear the game board
-        self.board_map[:, :] = UNVISITED
+        self.board_map[:, :] = UNVISITED_STATE
 
         # Randomize mine locations
         self.mine_map = self.mine_map.reshape(-1)
@@ -90,7 +131,7 @@ class Lawn(ArrayWin):
         self.scoreboard[:, :] = ' '
         self.scoreboard[1, :8] = "Welcome!"
 
-        self.marching = gsm.schedule(self.marching_scoreboard, delay=.3, n=120)
+        self.marching.is_canceled = False
 
         # Unset timer
         self.timer = None
@@ -122,7 +163,7 @@ class Lawn(ArrayWin):
         if self.timer and not self.revealed:
             self.scoreboard[0, -3:] = str(int(self.timer)).rjust(3, '0')
             self.timer += DELTA
-            self.scoreboard[0, :3] = str(self.num_mines - (self.board_map == FLAGGED).sum()).rjust(3, '0')
+            self.scoreboard[0, :3] = str(self.num_mines - (self.board_map == FLAGGED_STATE).sum()).rjust(3, '0')
         return super().refresh()
 
     def on_press(self, key: int) -> bool:
@@ -133,12 +174,12 @@ class Lawn(ArrayWin):
             self.scoreboard[1, :] = ' '
             self.marching.cancel()
 
-        if key in FORFEIT_KEY:
+        if key == FORFEIT_KEY:
             self.reveal_mines()
-        elif key == RESET:
+        elif key == RESET_KEY:
             self.init_lawn()
         elif not self.revealed:
-            if key == SPACE:
+            if key == SPACE_KEY:
                 self.poke()
             if key == FLAG_KEY:
                 self.flag()
@@ -149,26 +190,23 @@ class Lawn(ArrayWin):
     def flag(self) -> None:
         """Flag the location for potential mine."""
         row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
-        if self.board_map[row, col] == UNVISITED:
-            self.board_map[row, col] = FLAGGED
+        if self.board_map[row, col] == UNVISITED_STATE:
+            self.board_map[row, col] = FLAGGED_STATE
             self[row, col] = FLAG_SYMBOL
-        elif self.board_map[row, col] == FLAGGED:
-            self.board_map[row, col] = UNVISITED
-            self[row, col] = UNTOUCHED_SYMBOL
+        elif self.board_map[row, col] == FLAGGED_STATE:
+            self.board_map[row, col] = UNVISITED_STATE
+            self[row, col] = UNVISITED_SYMBOL
 
     def poke(self) -> None:
         """Expand the pointed location."""
         row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
         rows, cols = self.shape
 
-        if self.board_map[row, col] != UNVISITED:
-            return
-
         def expand_land(r: int, c: int) -> None:
             """Expand adjacent locations when the adjacent mine count is 0."""
-            if not (0 <= r < rows and 0 <= c < cols) or expands[r, c] == VISITED:
+            if not (0 <= r < rows and 0 <= c < cols) or expands[r, c] == VISITED_STATE:
                 return
-            expands[r, c] = VISITED
+            expands[r, c] = VISITED_STATE
 
             # Expand the 8 adjacent locations
             if self.solution_map[r, c] == EMPTY_SYMBOL:
@@ -177,13 +215,16 @@ class Lawn(ArrayWin):
                         if not (rr == r and cc == c):
                             expand_land(rr, cc)
 
+        if self.board_map[row, col] != UNVISITED_STATE:
+            return
+
         if self.mine_map[row, col]:
             self.lose(row, col)
         else:
             expands = self.board_map.copy()
             expand_land(row, col)
             self.board_map = expands
-            self[:, :] = np.where(self.board_map == VISITED, self.solution_map, self[:, :])
+            self[:, :] = np.where(self.board_map == VISITED_STATE, self.solution_map, self[:, :])
             self.evaluate()
 
     def win(self) -> None:
@@ -193,15 +234,15 @@ class Lawn(ArrayWin):
 
         self.scoreboard[0, len(self.scoreboard[0]) // 2] = HAPPYFACE_SYMBOL
         self.scoreboard[1, :8] = "You win!"
-        self.marching = gsm.schedule(self.marching_scoreboard, delay=.1, n=120)
+        self.marching.is_canceled = False
 
         self.revealed = True
 
     def lose(self, r: int, c: int) -> None:
         """Handle losing."""
         self[:, :] = np.where(self.mine_map,
-                              np.where(self.board_map == FLAGGED, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
-                              np.where(self.board_map == FLAGGED, BOXEDCROSS_SYMBOL, self.solution_map))
+                              np.where(self.board_map == FLAGGED_STATE, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
+                              np.where(self.board_map == FLAGGED_STATE, BOXEDCROSS_SYMBOL, self.solution_map))
 
         if r and c:
             colors_copy = np.full(self.shape, self.color)
@@ -210,15 +251,15 @@ class Lawn(ArrayWin):
 
         self.scoreboard[0, len(self.scoreboard[0]) // 2] = SADFACE_SYMBOL
         self.scoreboard[1, :8] = "You die!"
-        self.marching = gsm.schedule(self.marching_scoreboard, delay=.8, n=120)
+        self.marching.is_canceled = False
 
         self.revealed = True
 
     def evaluate(self) -> None:
         """Evaluate winning or losing."""
-        if np.all(self.mine_map == (self.board_map != VISITED)):
+        if np.all(self.mine_map == (self.board_map != VISITED_STATE)):
             self.win()
-        elif (self.board_map != VISITED).sum() == self.num_mines:
+        elif (self.board_map != VISITED_STATE).sum() == self.num_mines:
             row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
             self.lose(row, col)
 
@@ -227,7 +268,10 @@ with ScreenManager() as gsm:
     num_mines = 10
     rows, cols = 8, 8
 
-    lawn = gsm.root.new_widget(rows=rows, cols=cols, num_mines=num_mines, create_with=Lawn)
+    scoreboard = gsm.root.new_widget(OFFSET_TOP + rows + 2, OFFSET_LEFT, 2, max(8, cols),
+                                     color=colors.YELLOW_ON_BLACK, create_with="ArrayWin")
+
+    lawn = gsm.root.new_widget(rows=rows, cols=cols, num_mines=num_mines, scoreboard=scoreboard, create_with=Lawn)
     lawn.init_lawn()
 
     cursor = gsm.root.new_widget(rows, cols, OFFSET_TOP, OFFSET_LEFT, 1, 1, transparent=True, create_with=Cursor)
