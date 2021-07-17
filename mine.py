@@ -93,7 +93,7 @@ class Lawn(ArrayWin):
         self._num_mines = num_mines
 
         # Game board records the state of each cell
-        self._board_map = np.zeros((rows, cols)).astype(int)
+        self._state_map = np.zeros((rows, cols)).astype(int)
 
         # Initialize with given mine amount
         self._mine_map = np.r_[np.full(rows * cols - num_mines, False), np.full(num_mines, True)]
@@ -126,7 +126,7 @@ class Lawn(ArrayWin):
         self.revealed = False
 
         # Clear the game board
-        self._board_map[:, :] = COVERED_STATE
+        self._state_map[:, :] = COVERED_STATE
 
         # Randomize mine locations
         self._mine_map = self._mine_map.reshape(-1)
@@ -171,7 +171,7 @@ class Lawn(ArrayWin):
         if self.timer and not self.revealed:
             self.scoreboard[0, -3:] = str(int(self.timer)).rjust(3, '0')
             self.timer += DELTA
-            self.scoreboard[0, :3] = str(self._num_mines - (self._board_map == FLAGGED_STATE).sum()).rjust(3, '0')
+            self.scoreboard[0, :3] = str(self._num_mines - (self._state_map == FLAGGED_STATE).sum()).rjust(3, '0')
         return super().refresh()
 
     def on_press(self, key: int) -> bool:
@@ -198,11 +198,11 @@ class Lawn(ArrayWin):
     def flag(self) -> None:
         """Flag the location for potential mine."""
         row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
-        if self._board_map[row, col] == COVERED_STATE:
-            self._board_map[row, col] = FLAGGED_STATE
+        if self._state_map[row, col] == COVERED_STATE:
+            self._state_map[row, col] = FLAGGED_STATE
             self[row, col] = FLAG_SYMBOL
-        elif self._board_map[row, col] == FLAGGED_STATE:
-            self._board_map[row, col] = COVERED_STATE
+        elif self._state_map[row, col] == FLAGGED_STATE:
+            self._state_map[row, col] = COVERED_STATE
             self[row, col] = COVERED_SYMBOL
 
     def poke(self) -> None:
@@ -212,9 +212,9 @@ class Lawn(ArrayWin):
 
         def uncover_land(r: int, c: int) -> None:
             """Uncover adjacent locations when the adjacent mine count is 0."""
-            if not (0 <= r < rows and 0 <= c < cols) or uncovers[r, c] == UNCOVERED_STATE:
+            if not (0 <= r < rows and 0 <= c < cols) or state_map[r, c] == UNCOVERED_STATE:
                 return
-            uncovers[r, c] = UNCOVERED_STATE
+            state_map[r, c] = UNCOVERED_STATE
 
             # Uncover the 8 adjacent locations
             if self._solution_map[r, c] == EMPTY_SYMBOL:
@@ -223,16 +223,16 @@ class Lawn(ArrayWin):
                         if not (rr == r and cc == c):
                             uncover_land(rr, cc)
 
-        if self._board_map[row, col] != COVERED_STATE:
+        if self._state_map[row, col] != COVERED_STATE:
             return
 
         if self._mine_map[row, col]:
             self.lose(row, col)
         else:
-            uncovers = self._board_map.copy()
+            state_map = self._state_map.copy()
             uncover_land(row, col)
-            self._board_map = uncovers
-            self[:, :] = np.where(self._board_map == UNCOVERED_STATE, self._solution_map, self[:, :])
+            self._state_map = state_map
+            self[:, :] = np.where(self._state_map == UNCOVERED_STATE, self._solution_map, self[:, :])
             self.evaluate()
 
     def win(self) -> None:
@@ -249,8 +249,8 @@ class Lawn(ArrayWin):
     def lose(self, r: int, c: int) -> None:
         """Handle losing."""
         self[:, :] = np.where(self._mine_map,
-                              np.where(self._board_map == FLAGGED_STATE, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
-                              np.where(self._board_map == FLAGGED_STATE, BOXEDCROSS_SYMBOL, self._solution_map))
+                              np.where(self._state_map == FLAGGED_STATE, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
+                              np.where(self._state_map == FLAGGED_STATE, BOXEDCROSS_SYMBOL, self._solution_map))
 
         if r and c:
             colors_copy = np.full(self._shape, self.color)
@@ -265,9 +265,9 @@ class Lawn(ArrayWin):
 
     def evaluate(self) -> None:
         """Evaluate winning or losing."""
-        if np.all(self._mine_map == (self._board_map != UNCOVERED_STATE)):
+        if np.all(self._mine_map == (self._state_map != UNCOVERED_STATE)):
             self.win()
-        elif (self._board_map != UNCOVERED_STATE).sum() == self._num_mines:
+        elif (self._state_map != UNCOVERED_STATE).sum() == self._num_mines:
             row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
             self.lose(row, col)
 
