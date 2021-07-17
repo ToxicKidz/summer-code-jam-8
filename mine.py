@@ -6,7 +6,8 @@ from nurses.widgets.behaviors import Movable
 
 # Keybindings
 SPACE, RESET = ord(' '), ord('r')
-GG = ord('g'), ord('G')
+FORFEIT_KEY = ord('g')
+FLAG_KEY = ord('f')
 OFFSET_TOP, OFFSET_LEFT = 5, 25
 DELTA = .1
 
@@ -51,10 +52,10 @@ class Lawn(ArrayWin):
         self.num_mines = num_mines
 
         # Game board records the state of each cell
-        self.board = np.zeros((rows, cols)).astype(int)
+        self.board_map = np.zeros((rows, cols)).astype(int)
 
         # Initialize with given mine amount
-        self.mines_map = np.r_[np.full(rows * cols - num_mines, False), np.full(num_mines, True)]
+        self.mine_map = np.r_[np.full(rows * cols - num_mines, False), np.full(num_mines, True)]
         self.solution_map = np.zeros((rows, cols)).astype(int)
 
         # Scoreboard display scores and shoutout banner
@@ -76,15 +77,14 @@ class Lawn(ArrayWin):
         self.revealed = False
 
         # Clear the game board
-        self.board[:, :] = UNVISITED
+        self.board_map[:, :] = UNVISITED
 
         # Randomize mine locations
-        self.mines_map = self.mines_map.reshape(-1)
-        np.random.shuffle(self.mines_map)
-        self.mines_map = self.mines_map.reshape(self.shape)
+        self.mine_map = self.mine_map.reshape(-1)
+        np.random.shuffle(self.mine_map)
+        self.mine_map = self.mine_map.reshape(self.shape)
 
-        #
-        self.solution_map = self.gen_solution()
+        self.solution_map = self.build_solution()
 
         # Erase shoutout text
         self.scoreboard[:, :] = ' '
@@ -95,14 +95,14 @@ class Lawn(ArrayWin):
         # Unset timer
         self.timer = None
 
-    def gen_solution(self) -> np.ndarray:
+    def build_solution(self) -> np.ndarray:
         """Count mines near each land in adjacent lands."""
         rows, cols = self.shape
         solution_map = np.zeros((rows, cols)).astype(int)
 
         for r in range(rows):
             for c in range(cols):
-                solution_map[r, c] = self.mines_map[
+                solution_map[r, c] = self.mine_map[
                     max(0, r - 1):min(r + 2, rows),
                     max(0, c - 1):min(c + 2, cols)
                 ].sum()
@@ -115,14 +115,14 @@ class Lawn(ArrayWin):
         """Reveal mine locations."""
         if not self.revealed:
             self.revealed = True
-            self[:, :] = np.where(self.mines_map, MINE_SYMBOL, self[:, :])
+            self[:, :] = np.where(self.mine_map, MINE_SYMBOL, self[:, :])
 
     def refresh(self) -> None:
         """Handle terminal display refresh."""
         if self.timer and not self.revealed:
             self.scoreboard[0, -3:] = str(int(self.timer)).rjust(3, '0')
             self.timer += DELTA
-            self.scoreboard[0, :3] = str(self.num_mines - (self.board == FLAGGED).sum()).rjust(3, '0')
+            self.scoreboard[0, :3] = str(self.num_mines - (self.board_map == FLAGGED).sum()).rjust(3, '0')
         return super().refresh()
 
     def on_press(self, key: int) -> bool:
@@ -133,14 +133,14 @@ class Lawn(ArrayWin):
             self.scoreboard[1, :] = ' '
             self.marching.cancel()
 
-        if key in GG:
+        if key in FORFEIT_KEY:
             self.reveal_mines()
         elif key == RESET:
             self.init_lawn()
         elif not self.revealed:
             if key == SPACE:
                 self.poke()
-            if key == ord('f'):
+            if key == FLAG_KEY:
                 self.flag()
         else:
             return super().on_press(key)
@@ -149,11 +149,11 @@ class Lawn(ArrayWin):
     def flag(self) -> None:
         """Flag the location for potential mine."""
         row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
-        if self.board[row, col] == UNVISITED:
-            self.board[row, col] = FLAGGED
+        if self.board_map[row, col] == UNVISITED:
+            self.board_map[row, col] = FLAGGED
             self[row, col] = FLAG_SYMBOL
-        elif self.board[row, col] == FLAGGED:
-            self.board[row, col] = UNVISITED
+        elif self.board_map[row, col] == FLAGGED:
+            self.board_map[row, col] = UNVISITED
             self[row, col] = UNTOUCHED_SYMBOL
 
     def poke(self) -> None:
@@ -161,7 +161,7 @@ class Lawn(ArrayWin):
         row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
         rows, cols = self.shape
 
-        if self.board[row, col] != UNVISITED:
+        if self.board_map[row, col] != UNVISITED:
             return
 
         def expand_land(r: int, c: int) -> None:
@@ -177,18 +177,18 @@ class Lawn(ArrayWin):
                         if not (rr == r and cc == c):
                             expand_land(rr, cc)
 
-        if self.mines_map[row, col]:
+        if self.mine_map[row, col]:
             self.lose(row, col)
         else:
-            expands = self.board.copy()
+            expands = self.board_map.copy()
             expand_land(row, col)
-            self.board = expands
-            self[:, :] = np.where(self.board == VISITED, self.solution_map, self[:, :])
+            self.board_map = expands
+            self[:, :] = np.where(self.board_map == VISITED, self.solution_map, self[:, :])
             self.evaluate()
 
     def win(self) -> None:
         """Handle winning."""
-        self[:, :] = np.where(self.mines_map,
+        self[:, :] = np.where(self.mine_map,
                               BOXEDCHECK_SYMBOL, self.solution_map)
 
         self.scoreboard[0, len(self.scoreboard[0]) // 2] = HAPPYFACE_SYMBOL
@@ -199,9 +199,9 @@ class Lawn(ArrayWin):
 
     def lose(self, r: int, c: int) -> None:
         """Handle losing."""
-        self[:, :] = np.where(self.mines_map,
-                              np.where(self.board == FLAGGED, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
-                              np.where(self.board == FLAGGED, BOXEDCROSS_SYMBOL, self.solution_map))
+        self[:, :] = np.where(self.mine_map,
+                              np.where(self.board_map == FLAGGED, BOXEDCHECK_SYMBOL, MINE_SYMBOL),
+                              np.where(self.board_map == FLAGGED, BOXEDCROSS_SYMBOL, self.solution_map))
 
         if r and c:
             colors_copy = np.full(self.shape, self.color)
@@ -216,9 +216,9 @@ class Lawn(ArrayWin):
 
     def evaluate(self) -> None:
         """Evaluate winning or losing."""
-        if np.all(self.mines_map == (self.board != VISITED)):
+        if np.all(self.mine_map == (self.board_map != VISITED)):
             self.win()
-        elif (self.board != VISITED).sum() == self.num_mines:
+        elif (self.board_map != VISITED).sum() == self.num_mines:
             row, col = cursor.top - OFFSET_TOP, cursor.left - OFFSET_LEFT
             self.lose(row, col)
 
