@@ -14,8 +14,9 @@
 
 ## How to Run:
  1) Install all dependences `poetry install`
+    - Make sure poetry is installed with `pip install poetry`
     - On windows, use `poetry install -E windows`
- 2) Run `gameboy.py`
+ 2) Run `gameboy.py` with the command `poetry run python gameboy.py`
  3) Keybinds:
     * Open Games
         * 1 -> Snake
