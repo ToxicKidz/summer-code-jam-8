@@ -4,7 +4,7 @@
 * Games:
     * Pong
     * Snake
-    * Mine
+    * MineSweeper
 
 ## How To Run:
  1) Install all dependences `poetry install`
@@ -15,4 +15,3 @@
         * 2 -> Pong
         * 3-> MineSweeper
     * Escape -> Exit
-
